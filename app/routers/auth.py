@@ -13,6 +13,11 @@ from app.models import InviteCode, User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# A throwaway bcrypt hash to verify against when the username doesn't exist, so
+# login always does the same bcrypt work whether or not the user is real —
+# closes the timing side-channel that leaks which usernames exist. Computed once.
+_DUMMY_HASH = auth.hash_password("timing-attack-dummy-password")
+
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 @limiter.limit("10/minute")
@@ -58,7 +63,11 @@ async def login(
 ):
     result = await db.execute(select(User).where(User.username == form.username))
     user = result.scalar_one_or_none()
-    if user is None or not auth.verify_password(form.password, user.hashed_password):
+    # Always run bcrypt (against a dummy hash if the user is missing) so the
+    # response time doesn't reveal whether the username exists.
+    hashed = user.hashed_password if user is not None else _DUMMY_HASH
+    password_ok = auth.verify_password(form.password, hashed)
+    if user is None or not password_ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",

@@ -1,6 +1,31 @@
 """AI endpoint security tests — the guards work with NO real API key needed."""
+import asyncio
+
+from sqlalchemy import update
+
 from app.config import settings
-from tests.conftest import make_token, set_ai_used
+from app.models import User
+from tests.conftest import TestSession, make_token, set_ai_used
+
+
+async def test_quota_reserve_is_race_safe(client):
+    # Fire many concurrent atomic reserves (the exact UPDATE the AI route uses)
+    # and confirm the cap is never exceeded — no TOCTOU over-grant.
+    await make_token(client, username="racer")  # ai_calls_used starts at 0
+    quota = settings.ai_call_quota
+
+    async def reserve() -> int:
+        async with TestSession() as s:
+            r = await s.execute(
+                update(User)
+                .where(User.username == "racer", User.ai_calls_used < quota)
+                .values(ai_calls_used=User.ai_calls_used + 1)
+            )
+            await s.commit()
+            return r.rowcount
+
+    granted = sum(await asyncio.gather(*[reserve() for _ in range(quota + 15)]))
+    assert granted == quota  # exactly the cap, never more
 
 
 async def test_ai_requires_auth(client):

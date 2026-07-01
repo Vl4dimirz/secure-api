@@ -14,7 +14,7 @@ so it gets the full security treatment rather than being left open:
 """
 from anthropic import AsyncAnthropic
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import auth, schemas
@@ -34,21 +34,35 @@ async def summarize(
     db: AsyncSession = Depends(get_db),
     current_user: str = Depends(auth.get_current_user),
 ):
-    result = await db.execute(select(User).where(User.username == current_user))
-    user = result.scalar_one_or_none()
-    if user is None:  # token valid but account gone
+    exists = await db.execute(select(User.id).where(User.username == current_user))
+    if exists.scalar_one_or_none() is None:  # token valid but account gone
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown user")
 
-    # Quota check comes first — an exhausted account is refused before we ever
-    # touch the paid model.
-    if user.ai_calls_used >= settings.ai_call_quota:
+    # ATOMIC reserve — the whole check-and-increment is one UPDATE guarded by
+    # `ai_calls_used < quota`, so concurrent requests can't both slip past the
+    # cap (fixes a TOCTOU race where parallel calls could exceed the trial).
+    reserve = await db.execute(
+        update(User)
+        .where(User.username == current_user, User.ai_calls_used < settings.ai_call_quota)
+        .values(ai_calls_used=User.ai_calls_used + 1)
+    )
+    await db.commit()
+    if reserve.rowcount == 0:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="AI trial quota exhausted. Contact the owner for more access.",
         )
 
+    async def _refund() -> None:  # give the reserved slot back on failure
+        await db.execute(
+            update(User)
+            .where(User.username == current_user)
+            .values(ai_calls_used=User.ai_calls_used - 1)
+        )
+        await db.commit()
+
     if not settings.anthropic_api_key:
-        # Fail clearly instead of 500-ing when the server has no key configured.
+        await _refund()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="AI is not configured on this server.",
@@ -72,16 +86,16 @@ async def summarize(
             raise ValueError("empty completion")
     except Exception:
         # Never surface the raw provider error (could leak quota/key/model detail).
-        # A failed call doesn't burn the user's quota.
+        # Refund the reserved slot so a failed call doesn't burn the user's quota.
+        await _refund()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="The AI service is temporarily unavailable. Please try again.",
         )
 
-    # Only a successful call spends a quota unit.
-    user.ai_calls_used += 1
-    await db.commit()
+    # The slot was already reserved atomically above — just report what's left.
+    used = await db.execute(select(User.ai_calls_used).where(User.username == current_user))
     return schemas.SummarizeResponse(
         summary=summary,
-        calls_remaining=max(0, settings.ai_call_quota - user.ai_calls_used),
+        calls_remaining=max(0, settings.ai_call_quota - (used.scalar_one() or 0)),
     )
