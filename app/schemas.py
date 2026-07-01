@@ -38,3 +38,19 @@ class SummarizeRequest(BaseModel):
 class SummarizeResponse(BaseModel):
     summary: str
     calls_remaining: int  # trial calls left on this account after this one
+
+
+class GenerateCodesRequest(BaseModel):
+    count: int = Field(default=1, ge=1, le=100)
+    prefix: str = Field(default="INK", min_length=1, max_length=12)
+
+
+class GeneratedCodes(BaseModel):
+    created: list[str]
+
+
+class InviteCodeStatus(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    code: str
+    used_at: datetime | None
+    used_by: str | None

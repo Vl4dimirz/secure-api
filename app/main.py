@@ -8,7 +8,7 @@ from slowapi.errors import RateLimitExceeded
 from app.config import settings
 from app.database import init_db
 from app.limits import limiter
-from app.routers import ai, auth, items
+from app.routers import admin, ai, auth, items
 
 
 @asynccontextmanager
@@ -17,13 +17,14 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="0.7.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.8.0", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.include_router(auth.router)
 app.include_router(items.router)
 app.include_router(ai.router)
+app.include_router(admin.router)
 
 
 @app.get("/health", tags=["meta"])

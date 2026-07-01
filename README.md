@@ -45,6 +45,11 @@ The application code is database-agnostic: it runs on SQLite locally and on real
 | `POST` | `/items` | ✅ | Create an item |
 | `DELETE` | `/items/{id}` | ✅ | Delete an item |
 | `POST` | `/ai/summarize` | ✅ | Summarize text via Claude · rate-limited `10/min` · input capped · per-account quota |
+| `POST` | `/admin/invite-codes` | 🛡️ admin | Generate N single-use invite codes |
+| `GET` | `/admin/invite-codes` | 🛡️ admin | List codes with used/unused status |
+| `DELETE` | `/admin/invite-codes/{code}` | 🛡️ admin | Revoke an unused code |
+
+`✅` = user JWT · `🔑 code` = invite code · `🛡️ admin` = `X-Admin-Token` header.
 
 Interactive docs at `/docs` (Swagger) when running.
 
@@ -103,6 +108,7 @@ DATABASE_URL=sqlite+aiosqlite:///./app.db
 # Comma-separated, single-use invite codes — issue one per user; empty = closed.
 REGISTRATION_CODE=CODE-ONE,CODE-TWO,CODE-THREE
 AI_CALL_QUOTA=10   # AI calls allowed per account before it's cut off
+ADMIN_TOKEN=<long random token — enables /admin/*; empty = admin API disabled>
 ANTHROPIC_API_KEY=<your Anthropic key — enables /ai/summarize, else it returns 503>
 ```
 

@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     # Per-account AI call budget (trial). After this many calls the user is cut off
     # so a shared/leaked account can't run the bill up forever.
     ai_call_quota: int = 10
+    # Admin token guarding /admin/* (issuing/revoking invite codes). Empty = the
+    # admin API is DISABLED (fail-closed) — no one can mint codes without it.
+    admin_token: str = ""
     # Invite codes the owner issues to allow sign-ups — a COMMA-SEPARATED list.
     # These are SEEDED into the invite_codes table on startup; each one is then
     # SINGLE-USE (consumed on registration). Empty = registration is CLOSED

@@ -12,10 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from app import models  # noqa: F401  (register tables on Base)
+from app.config import settings
 from app.database import Base, get_db
 from app.limits import limiter
 from app.main import app
 from app.models import InviteCode, User
+
+# Known admin token for the test run (the admin API is fail-closed without one).
+ADMIN_TOKEN = "test-admin-token"
+ADMIN_HEADERS = {"X-Admin-Token": ADMIN_TOKEN}
 
 # One shared in-memory DB for the session; StaticPool keeps it alive across
 # connections (a plain :memory: engine would forget tables between them).
@@ -37,9 +42,12 @@ async def _setup():
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     limiter.enabled = False
+    prev_admin = settings.admin_token
+    settings.admin_token = ADMIN_TOKEN
     app.dependency_overrides[get_db] = override_get_db
     yield
     app.dependency_overrides.clear()
+    settings.admin_token = prev_admin
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 
