@@ -3,21 +3,19 @@
 We swap the app's get_db dependency for one bound to an in-memory SQLite engine,
 build fresh tables before every test, and disable the rate limiter by default so
 functional tests don't trip over each other. The rate-limit test re-enables it.
+Invite codes are single-use now, so helpers seed a fresh code per registration.
 """
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from app import models  # noqa: F401  (register tables on Base)
-from app.config import settings
 from app.database import Base, get_db
 from app.limits import limiter
 from app.main import app
-
-# A known invite code for the test run; the fixture injects it into settings so
-# registration (which is fail-closed by default) works during tests.
-TEST_CODE = "test-invite-code"
+from app.models import InviteCode, User
 
 # One shared in-memory DB for the session; StaticPool keeps it alive across
 # connections (a plain :memory: engine would forget tables between them).
@@ -39,12 +37,9 @@ async def _setup():
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     limiter.enabled = False
-    prev_code = settings.registration_code
-    settings.registration_code = TEST_CODE
     app.dependency_overrides[get_db] = override_get_db
     yield
     app.dependency_overrides.clear()
-    settings.registration_code = prev_code
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 
@@ -56,11 +51,29 @@ async def client():
         yield c
 
 
+async def seed_code(code: str):
+    """Insert an unused invite code straight into the test DB."""
+    async with TestSession() as session:
+        session.add(InviteCode(code=code))
+        await session.commit()
+
+
+async def set_ai_used(username: str, n: int):
+    """Force an account's spent-AI-call counter (to test the quota gate)."""
+    async with TestSession() as session:
+        result = await session.execute(select(User).where(User.username == username))
+        user = result.scalar_one()
+        user.ai_calls_used = n
+        await session.commit()
+
+
 async def make_token(client, username="not", password="supersecret1"):
-    """Register a user (with the test invite code) and return a Bearer token."""
+    """Seed a fresh single-use code, register a user with it, return a Bearer token."""
+    code = f"code-{username}"
+    await seed_code(code)
     await client.post(
         "/auth/register",
-        json={"username": username, "password": password, "code": TEST_CODE},
+        json={"username": username, "password": password, "code": code},
     )
     r = await client.post("/auth/login", data={"username": username, "password": password})
     return r.json()["access_token"]

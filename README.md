@@ -18,13 +18,14 @@ that a live API actually needs:
 | Layer | What it does | Why it matters (security) |
 |------:|--------------|---------------------------|
 | **Validation** | Pydantic v2 models on every input | Rejects malformed/oversized input at the edge |
-| **Invite-only sign-up** | Owner-issued code, fail-closed | No self-service accounts → nobody can burn the paid AI budget |
+| **Invite-only sign-up** | Owner-issued, single-use codes, fail-closed | No self-service accounts; a leaked code works exactly once |
 | **JWT auth** | Bearer tokens, `get_current_user` dependency | Only authenticated callers reach protected routes |
 | **Password hashing** | bcrypt, never plaintext | A DB leak doesn't expose passwords |
 | **Rate limiting** | slowapi, `5/min` on login | Blunts credential brute-force |
 | **Real database** | SQLAlchemy async, SQLite → Postgres by URL | Persistence + parameterized queries (no string SQL) |
 | **Tests** | 14 pytest cases, isolated in-memory DB | Guards every layer against regressions |
 | **Container** | Multi-stage image, runs as non-root | Smaller attack surface, no root in the container |
+| **Per-account AI quota** | N calls per account, then cut off | A shared/leaked login still can't drain the token budget |
 | **AI endpoint** | Authed, rate-limited, cost-capped Claude bridge | An LLM is a paid, abusable resource — treat it like one |
 
 The application code is database-agnostic: it runs on SQLite locally and on real
@@ -37,12 +38,12 @@ The application code is database-agnostic: it runs on SQLite locally and on real
 | Method | Path | Auth | Notes |
 |-------:|------|:----:|-------|
 | `GET` | `/health` | — | Liveness/readiness probe |
-| `POST` | `/auth/register` | 🔑 code | Create a user (bcrypt-hashed) · requires an owner-issued invite code |
+| `POST` | `/auth/register` | 🔑 code | Create a user (bcrypt-hashed) · requires an owner-issued **single-use** invite code |
 | `POST` | `/auth/login` | — | Returns a JWT · rate-limited `5/min` |
 | `GET` | `/items` | — | List items (public read) |
 | `POST` | `/items` | ✅ | Create an item |
 | `DELETE` | `/items/{id}` | ✅ | Delete an item |
-| `POST` | `/ai/summarize` | ✅ | Summarize text via Claude · rate-limited `10/min` · input capped |
+| `POST` | `/ai/summarize` | ✅ | Summarize text via Claude · rate-limited `10/min` · input capped · per-account quota |
 
 Interactive docs at `/docs` (Swagger) when running.
 
@@ -84,14 +85,17 @@ Copy `.env.example` to `.env` and fill in real values (never commit `.env`):
 ```env
 SECRET_KEY=<generate: python -c "import secrets; print(secrets.token_urlsafe(48))">
 DATABASE_URL=sqlite+aiosqlite:///./app.db
-# Comma-separated invite codes — issue one per user; empty = sign-ups closed.
+# Comma-separated, single-use invite codes — issue one per user; empty = closed.
 REGISTRATION_CODE=CODE-ONE,CODE-TWO,CODE-THREE
+AI_CALL_QUOTA=10   # AI calls allowed per account before it's cut off
 ANTHROPIC_API_KEY=<your Anthropic key — enables /ai/summarize, else it returns 503>
 ```
 
-Sign-up is **invite-only and fail-closed**: `/auth/register` accepts only the codes
-you list in `REGISTRATION_CODE`, so no one can self-serve an account and run up your
-AI bill. With no codes set, registration is disabled entirely.
+Sign-up is **invite-only, single-use, and fail-closed**: `/auth/register` accepts a
+code from `REGISTRATION_CODE` exactly once (it's consumed on use), so a leaked code
+can't be reshared to mint accounts. Each account then gets `AI_CALL_QUOTA` AI calls
+before it's cut off — so even a shared login can't run up your bill. No codes set =
+registration disabled entirely.
 
 Secrets are read from the environment only — nothing sensitive is hardcoded, and
 `.env` is git-ignored.

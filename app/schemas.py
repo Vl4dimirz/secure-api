@@ -37,3 +37,4 @@ class SummarizeRequest(BaseModel):
 
 class SummarizeResponse(BaseModel):
     summary: str
+    calls_remaining: int  # trial calls left on this account after this one

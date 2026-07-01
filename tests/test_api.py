@@ -1,8 +1,6 @@
-"""End-to-end API tests: health, auth flow, validation, ownership guards, rate limit."""
-import pytest
-
+"""End-to-end API tests: health, invite gate, auth flow, validation, rate limit."""
 from app.limits import limiter
-from tests.conftest import TEST_CODE, make_token
+from tests.conftest import make_token, seed_code
 
 
 async def test_health(client):
@@ -12,9 +10,10 @@ async def test_health(client):
 
 
 async def test_register_returns_username(client):
+    await seed_code("welcome-1")
     r = await client.post(
         "/auth/register",
-        json={"username": "alice", "password": "longenough1", "code": TEST_CODE},
+        json={"username": "alice", "password": "longenough1", "code": "welcome-1"},
     )
     assert r.status_code == 201
     assert r.json() == {"username": "alice"}
@@ -27,34 +26,55 @@ async def test_register_without_code_is_422(client):
     assert r.status_code == 422  # code is a required field
 
 
-async def test_register_wrong_code_is_403(client):
+async def test_register_unknown_code_is_403(client):
     r = await client.post(
         "/auth/register",
-        json={"username": "intruder", "password": "longenough1", "code": "wrong-code"},
+        json={"username": "intruder", "password": "longenough1", "code": "never-seeded"},
     )
-    assert r.status_code == 403  # invite-only gate blocks self-service sign-up
+    assert r.status_code == 403  # only owner-issued codes work
 
 
-async def test_duplicate_register_rejected(client):
-    body = {"username": "bob", "password": "longenough1", "code": TEST_CODE}
-    await client.post("/auth/register", json=body)
-    r = await client.post("/auth/register", json=body)
+async def test_invite_code_is_single_use(client):
+    await seed_code("one-shot")
+    first = await client.post(
+        "/auth/register",
+        json={"username": "user_a", "password": "longenough1", "code": "one-shot"},
+    )
+    assert first.status_code == 201
+    # Same code again -> refused; it was consumed, can't be shared/reused.
+    second = await client.post(
+        "/auth/register",
+        json={"username": "user_b", "password": "longenough1", "code": "one-shot"},
+    )
+    assert second.status_code == 403
+
+
+async def test_duplicate_username_does_not_consume_code(client):
+    await seed_code("code-x")
+    await seed_code("code-y")
+    await client.post(
+        "/auth/register",
+        json={"username": "bob", "password": "longenough1", "code": "code-x"},
+    )
+    # Same username, different (still-valid) code -> 400 for the name, not 403.
+    r = await client.post(
+        "/auth/register",
+        json={"username": "bob", "password": "longenough1", "code": "code-y"},
+    )
     assert r.status_code == 400
 
 
 async def test_short_password_is_422(client):
+    await seed_code("pw-code")
     r = await client.post(
         "/auth/register",
-        json={"username": "carol", "password": "short", "code": TEST_CODE},
+        json={"username": "carol", "password": "short", "code": "pw-code"},
     )
     assert r.status_code == 422  # Pydantic min_length=8
 
 
 async def test_login_wrong_password_is_401(client):
-    await client.post(
-        "/auth/register",
-        json={"username": "dave", "password": "longenough1", "code": TEST_CODE},
-    )
+    await make_token(client, username="dave")
     r = await client.post("/auth/login", data={"username": "dave", "password": "wrongpass123"})
     assert r.status_code == 401
 
@@ -101,16 +121,13 @@ async def test_delete_item(client):
 
 
 async def test_login_rate_limited_after_5(client):
-    await client.post(
-        "/auth/register",
-        json={"username": "eve", "password": "longenough1", "code": TEST_CODE},
-    )
+    await make_token(client, username="eve")
     limiter.enabled = True  # off by default in the harness; on just for this test
     try:
         codes = []
         for _ in range(6):
             r = await client.post(
-                "/auth/login", data={"username": "eve", "password": "longenough1"}
+                "/auth/login", data={"username": "eve", "password": "supersecret1"}
             )
             codes.append(r.status_code)
         assert 429 in codes  # the 6th within a minute must be throttled
