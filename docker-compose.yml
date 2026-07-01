@@ -31,6 +31,8 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Invite code that gates sign-ups. Empty = registration closed (fail-closed).
       REGISTRATION_CODE: ${REGISTRATION_CODE:-}
+      # Per-account AI trial budget (falls back to the app default of 10 if unset).
+      AI_CALL_QUOTA: ${AI_CALL_QUOTA:-10}
     depends_on:
       db:
         condition: service_healthy
