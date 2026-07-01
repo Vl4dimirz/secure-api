@@ -31,6 +31,9 @@ class Item(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # Which user owns this item — enforced on delete so no one can touch another
+    # user's data (fixes an IDOR / broken-object-level-authorization gap).
+    owner: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

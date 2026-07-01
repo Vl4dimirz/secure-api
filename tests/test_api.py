@@ -120,6 +120,37 @@ async def test_delete_item(client):
     assert r2.status_code == 404
 
 
+async def test_cannot_delete_others_item(client):
+    alice = await make_token(client, username="alice")
+    mallory = await make_token(client, username="mallory")
+    created = await client.post(
+        "/items", json={"title": "alice private note"},
+        headers={"Authorization": f"Bearer {alice}"},
+    )
+    item_id = created.json()["id"]
+    # mallory must NOT be able to delete alice's item (IDOR / BOLA fix) -> 404
+    r = await client.delete(f"/items/{item_id}", headers={"Authorization": f"Bearer {mallory}"})
+    assert r.status_code == 404
+    # ...but alice still can delete her own
+    r2 = await client.delete(f"/items/{item_id}", headers={"Authorization": f"Bearer {alice}"})
+    assert r2.status_code == 204
+
+
+async def test_register_rate_limited_after_10(client):
+    limiter.enabled = True  # off by default in the harness; on just for this test
+    try:
+        codes = []
+        for _ in range(11):
+            r = await client.post(
+                "/auth/register",
+                json={"username": "bruteforce", "password": "supersecret1", "code": "WRONG"},
+            )
+            codes.append(r.status_code)
+        assert 429 in codes  # brute-forcing /register is throttled
+    finally:
+        limiter.enabled = False
+
+
 async def test_login_rate_limited_after_5(client):
     await make_token(client, username="eve")
     limiter.enabled = True  # off by default in the harness; on just for this test

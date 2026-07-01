@@ -15,7 +15,12 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-async def register(payload: schemas.UserCreate, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def register(
+    request: Request,
+    payload: schemas.UserCreate,
+    db: AsyncSession = Depends(get_db),
+):
     # Invite-only + SINGLE-USE + fail-closed. The code must exist in the table and
     # still be unused; consuming it here means it can't be shared/reused to spin up
     # more accounts against the paid AI endpoint.

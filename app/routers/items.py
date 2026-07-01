@@ -22,7 +22,7 @@ async def create_item(
     db: AsyncSession = Depends(get_db),
     current_user: str = Depends(auth.get_current_user),
 ):
-    item = Item(title=payload.title, description=payload.description)
+    item = Item(title=payload.title, description=payload.description, owner=current_user)
     db.add(item)
     await db.commit()
     await db.refresh(item)
@@ -36,7 +36,9 @@ async def delete_item(
     current_user: str = Depends(auth.get_current_user),
 ):
     item = await db.get(Item, item_id)
-    if item is None:
+    # Not-found AND not-yours both return 404 — an authenticated user can't even
+    # tell whether someone else's item exists (no ownership enumeration).
+    if item is None or item.owner != current_user:
         raise HTTPException(status_code=404, detail="Item not found")
     await db.delete(item)
     await db.commit()

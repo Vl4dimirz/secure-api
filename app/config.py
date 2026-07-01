@@ -1,10 +1,17 @@
 """Central configuration — reads from env / .env."""
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# The insecure dev default. It lives in the public repo, so any deploy that
+# forgets to override SECRET_KEY could have its JWTs forged — startup refuses
+# to boot in production while this is still the value (see main.py lifespan).
+DEFAULT_SECRET = "dev-secret-change-me-in-prod"
+
 
 class Settings(BaseSettings):
     app_name: str = "Secure API"
-    secret_key: str = "dev-secret-change-me-in-prod"
+    # dev | production. In production the app refuses insecure defaults.
+    environment: str = "dev"
+    secret_key: str = DEFAULT_SECRET
     access_token_expire_minutes: int = 30
     # SQLite for local dev; swap to Postgres in prod (postgresql+asyncpg://...).
     database_url: str = "sqlite+aiosqlite:///./app.db"
