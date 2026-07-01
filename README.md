@@ -7,6 +7,9 @@ security decision, not an afterthought.
 
 Built with **FastAPI · SQLAlchemy 2.0 (async) · PostgreSQL · JWT · bcrypt · Docker**.
 
+> **[SECURITY.md](SECURITY.md)** — the controls, a self-penetration-test findings
+> table (each vuln proven, fixed, and regression-tested), and how to report an issue.
+
 ---
 
 ## Why this exists
