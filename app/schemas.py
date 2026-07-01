@@ -20,6 +20,9 @@ class Item(BaseModel):
 class UserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=50)
     password: str = Field(min_length=8, max_length=128)
+    # Invite code the API owner issues. Without a valid one, no account is created,
+    # so nobody can reach the paid AI endpoint and burn tokens.
+    code: str = Field(min_length=1, description="Registration invite code")
 
 
 class Token(BaseModel):

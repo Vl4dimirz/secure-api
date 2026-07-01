@@ -2,7 +2,7 @@
 import pytest
 
 from app.limits import limiter
-from tests.conftest import make_token
+from tests.conftest import TEST_CODE, make_token
 
 
 async def test_health(client):
@@ -12,24 +12,49 @@ async def test_health(client):
 
 
 async def test_register_returns_username(client):
-    r = await client.post("/auth/register", json={"username": "alice", "password": "longenough1"})
+    r = await client.post(
+        "/auth/register",
+        json={"username": "alice", "password": "longenough1", "code": TEST_CODE},
+    )
     assert r.status_code == 201
     assert r.json() == {"username": "alice"}
 
 
+async def test_register_without_code_is_422(client):
+    r = await client.post(
+        "/auth/register", json={"username": "noc", "password": "longenough1"}
+    )
+    assert r.status_code == 422  # code is a required field
+
+
+async def test_register_wrong_code_is_403(client):
+    r = await client.post(
+        "/auth/register",
+        json={"username": "intruder", "password": "longenough1", "code": "wrong-code"},
+    )
+    assert r.status_code == 403  # invite-only gate blocks self-service sign-up
+
+
 async def test_duplicate_register_rejected(client):
-    await client.post("/auth/register", json={"username": "bob", "password": "longenough1"})
-    r = await client.post("/auth/register", json={"username": "bob", "password": "longenough1"})
+    body = {"username": "bob", "password": "longenough1", "code": TEST_CODE}
+    await client.post("/auth/register", json=body)
+    r = await client.post("/auth/register", json=body)
     assert r.status_code == 400
 
 
 async def test_short_password_is_422(client):
-    r = await client.post("/auth/register", json={"username": "carol", "password": "short"})
+    r = await client.post(
+        "/auth/register",
+        json={"username": "carol", "password": "short", "code": TEST_CODE},
+    )
     assert r.status_code == 422  # Pydantic min_length=8
 
 
 async def test_login_wrong_password_is_401(client):
-    await client.post("/auth/register", json={"username": "dave", "password": "longenough1"})
+    await client.post(
+        "/auth/register",
+        json={"username": "dave", "password": "longenough1", "code": TEST_CODE},
+    )
     r = await client.post("/auth/login", data={"username": "dave", "password": "wrongpass123"})
     assert r.status_code == 401
 
@@ -76,7 +101,10 @@ async def test_delete_item(client):
 
 
 async def test_login_rate_limited_after_5(client):
-    await client.post("/auth/register", json={"username": "eve", "password": "longenough1"})
+    await client.post(
+        "/auth/register",
+        json={"username": "eve", "password": "longenough1", "code": TEST_CODE},
+    )
     limiter.enabled = True  # off by default in the harness; on just for this test
     try:
         codes = []

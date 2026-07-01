@@ -29,6 +29,8 @@ services:
       SECRET_KEY: ${SECRET_KEY:-change-me-in-real-prod}
       # Passed through from the host env / .env. Empty = AI endpoint returns 503.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Invite code that gates sign-ups. Empty = registration closed (fail-closed).
+      REGISTRATION_CODE: ${REGISTRATION_CODE:-}
     depends_on:
       db:
         condition: service_healthy

@@ -10,9 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from app import models  # noqa: F401  (register tables on Base)
+from app.config import settings
 from app.database import Base, get_db
 from app.limits import limiter
 from app.main import app
+
+# A known invite code for the test run; the fixture injects it into settings so
+# registration (which is fail-closed by default) works during tests.
+TEST_CODE = "test-invite-code"
 
 # One shared in-memory DB for the session; StaticPool keeps it alive across
 # connections (a plain :memory: engine would forget tables between them).
@@ -34,9 +39,12 @@ async def _setup():
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     limiter.enabled = False
+    prev_code = settings.registration_code
+    settings.registration_code = TEST_CODE
     app.dependency_overrides[get_db] = override_get_db
     yield
     app.dependency_overrides.clear()
+    settings.registration_code = prev_code
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 
@@ -49,7 +57,10 @@ async def client():
 
 
 async def make_token(client, username="not", password="supersecret1"):
-    """Register a user and return a valid Bearer token for authed requests."""
-    await client.post("/auth/register", json={"username": username, "password": password})
+    """Register a user (with the test invite code) and return a Bearer token."""
+    await client.post(
+        "/auth/register",
+        json={"username": username, "password": password, "code": TEST_CODE},
+    )
     r = await client.post("/auth/login", data={"username": username, "password": password})
     return r.json()["access_token"]
