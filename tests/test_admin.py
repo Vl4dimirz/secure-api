@@ -1,6 +1,23 @@
 """Admin API tests — issuing/listing/revoking invite codes, and its gate."""
 from app.config import settings
+from app.limits import limiter
 from tests.conftest import ADMIN_HEADERS
+
+
+async def test_admin_token_brute_force_is_rate_limited(client):
+    limiter.enabled = True  # off by default in the harness; on just for this test
+    try:
+        codes = []
+        for i in range(12):
+            r = await client.post(
+                "/admin/invite-codes", json={"count": 1},
+                headers={"X-Admin-Token": f"wrong-guess-{i}"},
+            )
+            codes.append(r.status_code)
+        # rate limit fires BEFORE the token check, so brute-force gets throttled
+        assert 429 in codes
+    finally:
+        limiter.enabled = False
 
 
 async def test_admin_requires_token(client):

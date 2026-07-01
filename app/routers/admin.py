@@ -3,16 +3,22 @@
 Gated by a single admin token (env ADMIN_TOKEN), checked in constant time and
 fail-closed: if no token is configured the whole /admin surface is disabled.
 Kept separate from user JWT auth on purpose — this is an operator capability.
+
+The token check runs INSIDE each handler (not as a dependency) so the rate
+limiter fires first — otherwise wrong-token guesses would 403 before being
+counted, leaving the admin token open to unlimited brute-force.
 """
 import secrets
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import Depends
 
 from app import schemas
 from app.config import settings
 from app.database import get_db
+from app.limits import limiter
 from app.models import InviteCode
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -21,14 +27,14 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 _ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
-async def require_admin(x_admin_token: str = Header(default="")):
+def _check_admin(token: str) -> None:
     expected = settings.admin_token
     if not expected:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Admin API is not configured.",
         )
-    if not secrets.compare_digest(x_admin_token, expected):
+    if not secrets.compare_digest(token, expected):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
         )
@@ -44,11 +50,15 @@ def _new_code(prefix: str) -> str:
     "/invite-codes",
     response_model=schemas.GeneratedCodes,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_admin)],
 )
+@limiter.limit("10/minute")
 async def generate_codes(
-    payload: schemas.GenerateCodesRequest, db: AsyncSession = Depends(get_db)
+    request: Request,
+    payload: schemas.GenerateCodesRequest,
+    db: AsyncSession = Depends(get_db),
+    x_admin_token: str = Header(default=""),
 ):
+    _check_admin(x_admin_token)
     created: list[str] = []
     for _ in range(payload.count):
         # Retry on the astronomically rare collision so we never insert a dup.
@@ -63,22 +73,27 @@ async def generate_codes(
     return schemas.GeneratedCodes(created=created)
 
 
-@router.get(
-    "/invite-codes",
-    response_model=list[schemas.InviteCodeStatus],
-    dependencies=[Depends(require_admin)],
-)
-async def list_codes(db: AsyncSession = Depends(get_db)):
+@router.get("/invite-codes", response_model=list[schemas.InviteCodeStatus])
+@limiter.limit("30/minute")
+async def list_codes(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    x_admin_token: str = Header(default=""),
+):
+    _check_admin(x_admin_token)
     result = await db.execute(select(InviteCode).order_by(InviteCode.id.desc()))
     return result.scalars().all()
 
 
-@router.delete(
-    "/invite-codes/{code}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_admin)],
-)
-async def revoke_code(code: str, db: AsyncSession = Depends(get_db)):
+@router.delete("/invite-codes/{code}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("30/minute")
+async def revoke_code(
+    request: Request,
+    code: str,
+    db: AsyncSession = Depends(get_db),
+    x_admin_token: str = Header(default=""),
+):
+    _check_admin(x_admin_token)
     result = await db.execute(select(InviteCode).where(InviteCode.code == code))
     invite = result.scalar_one_or_none()
     if invite is None:

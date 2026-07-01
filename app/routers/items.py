@@ -1,4 +1,5 @@
-"""Items CRUD backed by the database. Reads are public; writes require a valid JWT."""
+"""Items CRUD backed by the database. Every route requires a valid JWT, and a
+user only ever sees or touches their OWN items (no cross-user data exposure)."""
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,8 +12,15 @@ router = APIRouter(prefix="/items", tags=["items"])
 
 
 @router.get("", response_model=list[schemas.Item])
-async def list_items(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Item).order_by(Item.id.desc()))
+async def list_items(
+    db: AsyncSession = Depends(get_db),
+    current_user: str = Depends(auth.get_current_user),
+):
+    # Scope reads to the caller — items were world-readable before (anyone could
+    # read every user's data). Now you only ever see your own.
+    result = await db.execute(
+        select(Item).where(Item.owner == current_user).order_by(Item.id.desc())
+    )
     return result.scalars().all()
 
 

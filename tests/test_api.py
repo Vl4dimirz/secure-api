@@ -96,9 +96,28 @@ async def test_create_item_with_token_then_list(client):
     assert body["title"] == "Ship rung 6"
     assert body["id"] >= 1
 
-    r2 = await client.get("/items")  # list is public
+    # list is authed + scoped to the owner
+    r2 = await client.get("/items", headers={"Authorization": f"Bearer {token}"})
     assert r2.status_code == 200
     assert any(i["title"] == "Ship rung 6" for i in r2.json())
+
+
+async def test_list_items_requires_auth(client):
+    r = await client.get("/items")
+    assert r.status_code == 401  # reads are no longer public
+
+
+async def test_list_items_scoped_to_owner(client):
+    alice = await make_token(client, username="alice")
+    mallory = await make_token(client, username="mallory")
+    await client.post(
+        "/items", json={"title": "alice secret"},
+        headers={"Authorization": f"Bearer {alice}"},
+    )
+    # mallory must not see alice's items
+    r = await client.get("/items", headers={"Authorization": f"Bearer {mallory}"})
+    assert r.status_code == 200
+    assert all(i["title"] != "alice secret" for i in r.json())
 
 
 async def test_empty_title_is_422(client):
