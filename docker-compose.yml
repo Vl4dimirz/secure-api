@@ -1,0 +1,38 @@
+# One command to run the whole stack: `docker compose up --build`.
+# Proves the "Postgres-ready" design from rung 5 — the SAME app image runs on
+# real Postgres just by swapping DATABASE_URL. No code change.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      POSTGRES_DB: secureapi
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # api waits for this to pass before it starts, so init_db never races the DB
+      test: ["CMD-SHELL", "pg_isready -U appuser -d secureapi"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # asyncpg driver -> talks to the Postgres service above by its name "db"
+      DATABASE_URL: postgresql+asyncpg://appuser:${POSTGRES_PASSWORD:-devpassword}@db:5432/secureapi
+      # In real prod this comes from a secrets manager, NOT a default in the file.
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-real-prod}
+      # Passed through from the host env / .env. Empty = AI endpoint returns 503.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
