@@ -31,8 +31,11 @@ WORKDIR /app
 # Bring over the installed packages from the builder (no build toolchain left behind).
 COPY --from=builder /install /usr/local
 
-# Copy only the application code. .dockerignore keeps out .venv, app.db, tests, .env.
+# Copy the application code plus the Alembic migration scripts (run on startup).
+# .dockerignore keeps out .venv, app.db, tests, .env.
 COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
 
 # Security: run as an unprivileged user, never root. If the app is ever popped,
 # the attacker lands as a nobody with no write access to the code.

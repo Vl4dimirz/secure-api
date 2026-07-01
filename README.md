@@ -23,7 +23,8 @@ that a live API actually needs:
 | **Password hashing** | bcrypt, never plaintext | A DB leak doesn't expose passwords |
 | **Rate limiting** | slowapi, `5/min` on login | Blunts credential brute-force |
 | **Real database** | SQLAlchemy async, SQLite → Postgres by URL | Persistence + parameterized queries (no string SQL) |
-| **Tests** | 14 pytest cases, isolated in-memory DB | Guards every layer against regressions |
+| **Tests** | 18 pytest cases, isolated in-memory DB | Guards every layer against regressions |
+| **Migrations** | Alembic, auto-applied on startup | Schema evolves without wiping data |
 | **Container** | Multi-stage image, runs as non-root | Smaller attack surface, no root in the container |
 | **Per-account AI quota** | N calls per account, then cut off | A shared/leaked login still can't drain the token budget |
 | **AI endpoint** | Authed, rate-limited, cost-capped Claude bridge | An LLM is a paid, abusable resource — treat it like one |
@@ -70,10 +71,24 @@ docker compose up --build
 The same image runs on Postgres purely by swapping `DATABASE_URL` — that switch is
 already wired in `docker-compose.yml`.
 
+### Database migrations (Alembic)
+
+The schema is managed by **Alembic migrations**, applied automatically on startup —
+so both local and Docker "just work" on a fresh database, and a schema change never
+means wiping data. To evolve the schema, edit the models then:
+
+```bash
+.venv\Scripts\alembic revision --autogenerate -m "describe the change"
+.venv\Scripts\alembic upgrade head     # also runs automatically when the app starts
+```
+
+Existing rows are preserved (it's an `ALTER`, not a drop-and-recreate) — no more
+`docker compose down -v`.
+
 ### Tests
 
 ```bash
-.venv\Scripts\pytest      # 14 passed
+.venv\Scripts\pytest      # 18 passed
 ```
 
 ---
@@ -109,11 +124,12 @@ app/
   main.py         # app wiring: lifespan (DB init), rate limiter, routers
   config.py       # env-driven settings (pydantic-settings)
   database.py     # async engine, session, get_db dependency
-  models.py       # SQLAlchemy ORM tables (User, Item)
+  models.py       # SQLAlchemy ORM tables (User, Item, InviteCode)
   schemas.py      # Pydantic request/response models
   auth.py         # bcrypt hashing, JWT, get_current_user
   limits.py       # slowapi rate limiter
   routers/        # auth, items, ai
+alembic/          # migration scripts (versions/) + env.py
 tests/            # pytest suite (isolated in-memory DB)
 Dockerfile        # multi-stage, non-root
 docker-compose.yml# api + postgres

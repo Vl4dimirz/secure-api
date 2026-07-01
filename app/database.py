@@ -1,8 +1,14 @@
 """Async database layer (SQLAlchemy 2.0). SQLite locally, Postgres in prod via URL."""
+import asyncio
+from pathlib import Path
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings
+
+# Project root = parent of the app/ package. Used to locate the Alembic scripts.
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 engine = create_async_engine(settings.database_url, echo=False)
 SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -17,15 +23,34 @@ async def get_db():
         yield session
 
 
+async def _upgrade_to_head() -> None:
+    """Run Alembic migrations up to the latest revision.
+
+    Alembic drives its own event loop internally, so we run it in a worker thread
+    to avoid clashing with the app's running loop. We build the Config in code (no
+    .ini file) so it never hijacks the app's logging setup.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    def _run() -> None:
+        cfg = Config()
+        cfg.set_main_option("script_location", str(BASE_DIR / "alembic"))
+        command.upgrade(cfg, "head")
+
+    await asyncio.to_thread(_run)
+
+
 async def init_db() -> None:
     from sqlalchemy import select
 
     from app import models
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
 
-    # Seed invite codes from config into the table (idempotent — never resets the
-    # 'used' state of a code that's already been consumed).
+    # Alembic owns the schema now: migrate to head instead of create_all, so a
+    # schema change is a new migration — never a database wipe.
+    await _upgrade_to_head()
+
+    # Seed invite codes from config (idempotent — never resets a consumed code).
     async with SessionLocal() as session:
         for code in settings.valid_codes():
             found = await session.execute(
