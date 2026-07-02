@@ -9,6 +9,19 @@ async def test_health(client):
     assert r.json()["status"] == "ok"
 
 
+async def test_security_headers_present(client):
+    r = await client.get("/health")
+    for header in (
+        "content-security-policy",
+        "strict-transport-security",
+        "x-content-type-options",
+        "x-frame-options",
+        "referrer-policy",
+    ):
+        assert r.headers.get(header), f"missing {header}"
+    assert r.headers["x-content-type-options"] == "nosniff"
+
+
 async def test_register_returns_username(client):
     await seed_code("welcome-1")
     r = await client.post(

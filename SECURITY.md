@@ -23,6 +23,7 @@ a working proof-of-concept, fixed, and locked in with an automated regression te
 | Input validation | Pydantic v2 schemas on every request; oversized/empty input rejected at the edge |
 | Injection | SQLAlchemy parameterized queries throughout — no string-built SQL |
 | Secrets | Read from environment only; **the app refuses to boot in production while the JWT secret is still the repo default** |
+| Response hardening | Security headers on every response (CSP, HSTS, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, Referrer-Policy, Permissions-Policy); interactive docs / OpenAPI schema disabled in production; server version banner suppressed |
 | Transport/runtime | Multi-stage Docker image runs as a non-root user |
 | Schema changes | Alembic migrations — no destructive rebuilds |
 
@@ -30,8 +31,12 @@ a working proof-of-concept, fixed, and locked in with an automated regression te
 
 ## Self-assessment (penetration test findings)
 
-The API was attacked against itself across several rounds. All findings are fixed
-and covered by tests in `tests/`.
+The API was attacked against itself across several rounds — first by hand, then
+scanned with **[raidkit](https://github.com/Vl4dimirz/raidkit)** (my own
+authorized web security scanner). The header/exposure/discovery findings raidkit
+reported were remediated; a scan of the hardened production configuration now
+returns **zero findings above INFO**. All findings below are fixed and covered by
+tests in `tests/`.
 
 | # | Finding | OWASP API | Severity | Status |
 |---|---------|-----------|----------|--------|
