@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,32 +28,37 @@ async def register(
     payload: schemas.UserCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    # Invite-only + SINGLE-USE + fail-closed. The code must exist in the table and
-    # still be unused; consuming it here means it can't be shared/reused to spin up
-    # more accounts against the paid AI endpoint.
-    result = await db.execute(
-        select(InviteCode).where(
-            InviteCode.code == payload.code, InviteCode.used_at.is_(None)
-        )
+    # Reject an obvious username clash up front — without consuming a code.
+    existing = await db.execute(select(User).where(User.username == payload.username))
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=400, detail="Username already taken")
+
+    # Invite-only + SINGLE-USE + fail-closed, consumed ATOMICALLY: one UPDATE
+    # guarded by `used_at IS NULL`, so only ONE of several concurrent registrations
+    # with the same code wins (rowcount == 1) and the rest get 403. A plain
+    # SELECT-then-set was a TOCTOU race that minted many accounts from one
+    # single-use code — the sibling of the AI-quota race fixed earlier.
+    consumed = await db.execute(
+        update(InviteCode)
+        .where(InviteCode.code == payload.code, InviteCode.used_at.is_(None))
+        .values(used_at=datetime.now(timezone.utc), used_by=payload.username)
     )
-    invite = result.scalar_one_or_none()
-    if invite is None:
+    if consumed.rowcount == 0:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid or already-used registration code",
         )
 
-    existing = await db.execute(select(User).where(User.username == payload.username))
-    if existing.scalar_one_or_none() is not None:
-        # Don't consume the code on a name clash — let them retry a different name.
-        raise HTTPException(status_code=400, detail="Username already taken")
-
-    invite.used_at = datetime.now(timezone.utc)
-    invite.used_by = payload.username
     user = User(username=payload.username, hashed_password=auth.hash_password(payload.password))
     db.add(user)
-    await db.commit()
-    return {"username": user.username}
+    try:
+        await db.commit()
+    except IntegrityError:
+        # A concurrent request grabbed this username after our check. Roll back —
+        # which also releases the code we just consumed, so it stays usable.
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Username already taken")
+    return {"username": payload.username}
 
 
 @router.post("/login", response_model=schemas.Token)
