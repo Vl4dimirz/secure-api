@@ -16,6 +16,16 @@ class User(Base):
     ai_calls_used: Mapped[int] = mapped_column(default=0)
 
 
+class RevokedToken(Base):
+    """A JWT that has been logged out. Its `jti` is blocked until it would have
+    expired anyway (rows past `expires_at` are safe to purge)."""
+
+    __tablename__ = "revoked_tokens"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    jti: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class InviteCode(Base):
     """A single-use registration code. Once `used_at` is set, it can't register again."""
 

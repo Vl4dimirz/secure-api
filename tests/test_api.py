@@ -97,6 +97,17 @@ async def test_create_item_without_token_is_401(client):
     assert r.status_code == 401
 
 
+async def test_logout_revokes_token(client):
+    token = await make_token(client, username="revoker")
+    h = {"Authorization": f"Bearer {token}"}
+    assert (await client.post("/items", json={"title": "a"}, headers=h)).status_code == 201
+    # log out -> revoke this token
+    assert (await client.post("/auth/logout", headers=h)).status_code == 204
+    # the same token is now rejected everywhere
+    assert (await client.post("/items", json={"title": "b"}, headers=h)).status_code == 401
+    assert (await client.get("/items", headers=h)).status_code == 401
+
+
 async def test_create_item_with_token_then_list(client):
     token = await make_token(client)
     r = await client.post(

@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    version="0.10.0",
+    version="0.11.0",
     lifespan=lifespan,
     # Don't expose the interactive docs / OpenAPI schema in production.
     docs_url=None if _IS_PROD else "/docs",

@@ -16,6 +16,8 @@ a working proof-of-concept, fixed, and locked in with an automated regression te
 |------|---------|
 | Authentication | Signed JWTs (HS256, `exp` enforced); passwords hashed with bcrypt (salted), never stored or logged in plaintext |
 | Login hardening | Constant-time password check (bcrypt runs even for unknown usernames — no timing oracle); rate limited (5/min) |
+| Sessions | JWTs carry a `jti`; **`POST /auth/logout` revokes a token** (denylist checked on every authenticated request) — a leaked/logged-out token stops working immediately |
+| Rate limiting | Per-endpoint limits (login, register, admin, AI); **in-memory or a shared Redis store** (`REDIS_URL`) so limits hold across replicas |
 | Registration | Invite-only, **single-use** codes, **fail-closed** (no codes configured = registration disabled); rate limited (10/min) |
 | Authorization | Per-object ownership — a user can only read or delete their own items (no cross-user access) |
 | AI endpoint | Requires a JWT; per-account call quota enforced with an **atomic** reserve (no race); input length capped; provider errors never leaked to the client |
@@ -62,14 +64,20 @@ were reproduced with a live proof-of-concept before and after the fix (forged to
 In scope: the HTTP API surface — authentication, authorization, input handling,
 rate limiting, and abuse of the paid AI endpoint.
 
-Known, accepted limitations (documented rather than hidden):
+Previously-documented gaps, now closed:
 
-- **No token revocation.** JWTs are valid until they expire (30 min default); there
-  is no server-side blacklist. Keep the expiry short; add a deny-list if needed.
-- **Rate-limit store is in-memory.** Fine for a single instance; use a shared store
-  (e.g. Redis) if you run multiple replicas.
-- **Registration reveals username-taken** (`400`) vs an invalid code (`403`). With
-  single-use invite codes this yields at most one probe per code.
+- **Token revocation** — `POST /auth/logout` denylists the token's `jti` (stored
+  until it would expire), so a leaked or logged-out token stops working
+  immediately. Checked on every authenticated request.
+- **Rate-limit store** — in-memory by default, or a shared **Redis** store via
+  `REDIS_URL`, so limits hold across horizontally-scaled replicas.
+
+Remaining, bounded by design (not a practical exposure):
+
+- **Registration reveals username-taken** (`400`) vs an invalid code (`403`).
+  Registration is invite-only with **single-use** codes and is rate-limited, so
+  enumeration costs one consumed code per probe — economically infeasible at
+  scale. (Login itself does not leak: constant-time, generic `401`.)
 
 ---
 

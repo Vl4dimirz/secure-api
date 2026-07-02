@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     # SQLite for local dev; swap to Postgres in prod (postgresql+asyncpg://...).
     database_url: str = "sqlite+aiosqlite:///./app.db"
+    # Optional shared store for rate limits (e.g. redis://host:6379). Empty =
+    # in-memory (single instance only).
+    redis_url: str = ""
     # AI bridge — key is read from env/.env, never hardcoded. Empty = AI disabled.
     anthropic_api_key: str = ""
     ai_model: str = "claude-haiku-4-5-20251001"

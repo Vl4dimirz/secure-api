@@ -1,15 +1,17 @@
-"""Auth routes — register + login, backed by the database. Login is rate-limited."""
+"""Auth routes — register + login + logout, backed by the database."""
+import jwt
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import auth, schemas
 from app.database import get_db
 from app.limits import limiter
-from app.models import InviteCode, User
+from app.models import InviteCode, RevokedToken, User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -75,3 +77,29 @@ async def login(
         )
     token = auth.create_access_token(subject=user.username)
     return schemas.Token(access_token=token)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(
+    token: str = Depends(auth.oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke the presented token — its `jti` is denylisted until it expires, so
+    it stops working immediately (JWTs are otherwise valid until expiry)."""
+    try:
+        payload = auth.decode_token(token)
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    jti = payload.get("jti")
+    exp = payload.get("exp")
+    if jti:
+        expires_at = (
+            datetime.fromtimestamp(exp, tz=timezone.utc) if exp else datetime.now(timezone.utc)
+        )
+        db.add(RevokedToken(jti=jti, expires_at=expires_at))
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()  # already revoked - fine, still logged out
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

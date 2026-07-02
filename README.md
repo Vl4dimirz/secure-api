@@ -44,6 +44,7 @@ The application code is database-agnostic: it runs on SQLite locally and on real
 | `GET` | `/health` | — | Liveness/readiness probe |
 | `POST` | `/auth/register` | 🔑 code | Create a user (bcrypt-hashed) · requires an owner-issued **single-use** invite code |
 | `POST` | `/auth/login` | — | Returns a JWT · rate-limited `5/min` |
+| `POST` | `/auth/logout` | ✅ | Revokes the current token (denylist) |
 | `GET` | `/items` | — | List items (public read) |
 | `POST` | `/items` | ✅ | Create an item |
 | `DELETE` | `/items/{id}` | ✅ | Delete an item |
