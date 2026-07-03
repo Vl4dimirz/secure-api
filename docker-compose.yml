@@ -23,6 +23,11 @@ services:
     ports:
       - "8000:8000"
     environment:
+      # dev | production. In production the app disables the interactive docs
+      # (/docs, /redoc, /openapi.json) and fails closed on insecure defaults.
+      # A public deploy MUST set this to production (raidkit R6 caught /docs open
+      # because the container was silently defaulting to dev).
+      ENVIRONMENT: ${ENVIRONMENT:-dev}
       # asyncpg driver -> talks to the Postgres service above by its name "db"
       DATABASE_URL: postgresql+asyncpg://appuser:${POSTGRES_PASSWORD:-devpassword}@db:5432/secureapi
       # In real prod this comes from a secrets manager, NOT a default in the file.
